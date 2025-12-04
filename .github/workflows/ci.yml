@@ -67,46 +67,6 @@ jobs:
           name: codecov-umbrella
           fail_ci_if_error: false
 
-  build:
-    name: Build APK
-    needs: test
-    runs-on: ubuntu-latest
-    
-    strategy:
-      matrix:
-        environment: [dev, staging, prod]
-    
-    steps:
-      - name: 📚 Checkout code
-        uses: actions/checkout@v6
-
-      - name: 🔧 Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.27.1'
-          channel: 'stable'
-          cache: true
-
-      - name: 📦 Get dependencies
-        run: flutter pub get
-
-      - name: 🏗️ Build APK for ${{ matrix.environment }}
-        run: |
-          if [ "${{ matrix.environment }}" = "dev" ]; then
-            flutter build apk --dart-define=BUILD_ENV=dev --dart-define=API_URL=https://api-dev.example.com
-          elif [ "${{ matrix.environment }}" = "staging" ]; then
-            flutter build apk --dart-define=BUILD_ENV=staging --dart-define=API_URL=https://api-staging.example.com
-          else
-            flutter build apk --dart-define=BUILD_ENV=prod --dart-define=API_URL=https://api.example.com --dart-define=PRODUCTION=true
-          fi
-
-      - name: 📦 Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-${{ matrix.environment }}-release
-          path: build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 30
-
   build-flavors:
     name: Build APK with Flavors
     needs: test
@@ -176,7 +136,7 @@ jobs:
 
   summary:
     name: CI Summary
-    needs: [analyze, test, build]
+    needs: [analyze, test, build-flavors]
     runs-on: ubuntu-latest
     if: always()
     
@@ -189,7 +149,7 @@ jobs:
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Analyze | ${{ needs.analyze.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Test | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build Flavors | ${{ needs.build-flavors.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Environment" >> $GITHUB_STEP_SUMMARY
           echo "- Branch: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY

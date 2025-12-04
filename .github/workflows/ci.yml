@@ -1,0 +1,197 @@
+name: Flutter CI
+
+on:
+  push:
+    branches: [ develop, main ]
+  pull_request:
+    branches: [ develop, main ]
+
+jobs:
+  analyze:
+    name: Code Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📚 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+          cache: true
+
+      - name: 📦 Get dependencies
+        run: flutter pub get
+
+      - name: 🎨 Verify formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: 🔍 Analyze code
+        run: flutter analyze --fatal-infos
+
+  test:
+    name: Run Tests
+    needs: analyze
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📚 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+          cache: true
+
+      - name: 📦 Get dependencies
+        run: flutter pub get
+
+      - name: 🧪 Run tests with coverage
+        run: flutter test --coverage
+
+      - name: 📊 Check coverage threshold
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lcov
+          bash scripts/check_coverage.sh
+
+      - name: 📈 Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  build:
+    name: Build APK
+    needs: test
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+    
+    steps:
+      - name: 📚 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+          cache: true
+
+      - name: 📦 Get dependencies
+        run: flutter pub get
+
+      - name: 🏗️ Build APK for ${{ matrix.environment }}
+        run: |
+          if [ "${{ matrix.environment }}" = "dev" ]; then
+            flutter build apk --dart-define=BUILD_ENV=dev --dart-define=API_URL=https://api-dev.example.com
+          elif [ "${{ matrix.environment }}" = "staging" ]; then
+            flutter build apk --dart-define=BUILD_ENV=staging --dart-define=API_URL=https://api-staging.example.com
+          else
+            flutter build apk --dart-define=BUILD_ENV=prod --dart-define=API_URL=https://api.example.com --dart-define=PRODUCTION=true
+          fi
+
+      - name: 📦 Upload APK artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: app-${{ matrix.environment }}-release
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
+
+  build-flavors:
+    name: Build APK with Flavors
+    needs: test
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        flavor: [dev, staging, prod]
+    
+    steps:
+      - name: 📚 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+          cache: true
+
+      - name: 📦 Get dependencies
+        run: flutter pub get
+
+      - name: 🏗️ Build APK with flavor ${{ matrix.flavor }}
+        run: |
+          if [ "${{ matrix.flavor }}" = "dev" ]; then
+            flutter build apk --flavor dev --target lib/main_dev.dart --dart-define=BUILD_ENV=dev --dart-define=API_URL=https://api-dev.example.com
+          elif [ "${{ matrix.flavor }}" = "staging" ]; then
+            flutter build apk --flavor staging --target lib/main_staging.dart --dart-define=BUILD_ENV=staging --dart-define=API_URL=https://api-staging.example.com
+          else
+            flutter build apk --flavor prod --target lib/main_prod.dart --dart-define=BUILD_ENV=prod --dart-define=API_URL=https://api.example.com --dart-define=PRODUCTION=true
+          fi
+
+      - name: 📦 Upload APK artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: app-${{ matrix.flavor }}-flavor-release
+          path: build/app/outputs/flutter-apk/app-${{ matrix.flavor }}-release.apk
+          retention-days: 30
+
+  version-bump:
+    name: Automated Version Bump
+    needs: [analyze, test]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - name: 📚 Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔢 Increment version
+        run: bash scripts/increment_version.sh
+
+      - name: 📝 Commit version bump
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add pubspec.yaml
+          git diff --quiet && git diff --staged --quiet || git commit -m "chore: bump version [skip ci]"
+
+      - name: 🚀 Push changes
+        run: git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  summary:
+    name: CI Summary
+    needs: [analyze, test, build]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: 📊 Generate summary
+        run: |
+          echo "## 🎉 CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Analyze | ${{ needs.analyze.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Environment" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Actor: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
